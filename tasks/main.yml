@@ -1,0 +1,117 @@
+---
+
+- name: Install Javai 8 using YUM.
+  yum:
+    name: "{{java.VERSION}}"
+    state: present
+  become: true
+
+- name: Correct the alternatives to change default Java version.
+  alternatives:
+    name: java
+    link: /bin/java
+    path: "{{java.ALTERNATIVES}}"
+
+- name: Download Jenkins repo yum URL for
+  get_url:
+    url: "{{jenkins.repo_URL}}"
+    dest: /etc/yum.repos.d/jenkins.repo
+  become: true
+
+- name: Import GPG Key
+  rpm_key:
+    state: present
+    key: "{{jenkins.gpg_key}}"
+
+- name: Install Jenkins
+  yum:
+    name: jenkins
+    state: present
+
+- name: Change Jenkins JAVA options
+  lineinfile:
+    dest=/etc/sysconfig/jenkins
+    regexp=^JENKINS_JAVA_OPTIONS=
+    line=JENKINS_JAVA_OPTIONS="{{jenkins.JAVA_OPTIONS}}"
+  become: true
+
+- name: Start Jenkins service and enable on boot
+  service:
+    name: jenkins
+    state: started
+    enabled: yes
+
+- name: Wait for jenkins to start
+  wait_for:
+     port=8080
+     delay=20
+
+- name: Download Jenkins CLI jar
+  get_url:
+    url: http://ec2-13-232-187-2.ap-south-1.compute.amazonaws.com:8080/jnlpjars/jenkins-cli.jar
+    dest: /opt/jenkins-cli.jar
+    mode: 755
+
+- name: Install Jenkins  plugin using CLI jar
+  sudo: yes
+  command: java -jar /opt/jenkins-cli.jar -s http://ec2-13-232-187-2.ap-south-1.compute.amazonaws.com:8080/ install-plugin {{ item }}
+  with_items:
+      - MSBuild
+      - MSTest
+      - MSTest
+      - workflow-aggregator
+      - CCM
+      - PowerShell
+      - NAnt
+      - Nomad
+  ignore_errors: True
+  failed_when: False
+  no_logs: True
+
+- name: wait for Pipeline plugin to be install
+  wait_for:
+    path: /var/lib/jenkins/plugins/workflow-aggregator.jpi
+    state: present
+    delay: 10
+
+- name: wait for MSTest plugin to be installed
+  wait_for:
+    path: /var/lib/jenkins/plugins/mstest.jpi
+    state: present
+    delay: 10
+
+- name: Restart Jenkins
+  systemd:
+  name: jenkins
+  state: restarted
+
+- name: Restart Jenkins
+  sudo: yes
+  command: java -jar /opt/jenkins-cli.jar -s http://ec2-13-232-187-2.ap-south-1.compute.amazonaws.com:8080 safe-restart
+
+- name: wait for jenkins to start
+  wait_for:
+    port=8080
+    delay=20
+
+- name: Copy Maven plugin Configuration
+  copy:
+    src: /etc/ansible/templates/hudson.tasks.Maven.yml
+    dest: /var/lib/jenkins
+    mode: 755
+
+- name: copy job configuration to ci-server home
+  copy:
+    src: /etc/ansible/templates/jsp-demo.xml
+    dest: /var/lib/jenkins/jobs
+    mode: 755
+
+- name: Restart Jenkins
+  systemd:
+  name: jenkins
+  state: restarted
+
+- name: wait for jenkins to start
+  wait_for:
+    port=8080
+    delay=20
